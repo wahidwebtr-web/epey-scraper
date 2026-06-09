@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
-const puppeteer = require("puppeteer-core");
-const chromium = require("@sparticuz/chromium");
+const axios = require("axios");
+const { JSDOM } = require("jsdom");
 
 const app = express();
 app.use(cors());
@@ -15,72 +15,57 @@ app.post("/scrape", async (req, res) => {
         return res.json({ status: "error", message: "URL missing" });
     }
 
-    let browser = null;
-
     try {
 
-        browser = await puppeteer.launch({
-            args: chromium.args,
-            defaultViewport: chromium.defaultViewport,
-            executablePath: await chromium.executablePath(),
-            headless: chromium.headless
+        const { data: html } = await axios.get(url, {
+            headers: {
+                "User-Agent": "Mozilla/5.0"
+            }
         });
 
-        const page = await browser.newPage();
+        const dom = new JSDOM(html);
+        const document = dom.window.document;
 
-        await page.setUserAgent(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-        );
+        const title =
+            document.querySelector("h1")?.textContent?.trim() || "";
 
-        await page.goto(url, {
-            waitUntil: "domcontentloaded",
-            timeout: 60000
+        let images = [];
+        document.querySelectorAll("img").forEach(img => {
+            let src = img.src || "";
+            if (
+                src &&
+                !src.includes("logo") &&
+                !src.includes("icon")
+            ) {
+                images.push(src);
+            }
         });
 
-        const data = await page.evaluate(() => {
+        images = [...new Set(images)].slice(0, 10);
 
-            const title = document.querySelector("h1")?.innerText?.trim() || "";
+        let attributes = [];
 
-            let images = [];
-            document.querySelectorAll("img").forEach(img => {
-                if (img.src &&
-                    !img.src.includes("logo") &&
-                    !img.src.includes("icon")) {
-                    images.push(img.src);
-                }
-            });
+        document.querySelectorAll("table tr").forEach(row => {
+            let tds = row.querySelectorAll("td");
 
-            images = [...new Set(images)].slice(0, 10);
+            if (tds.length >= 2) {
+                let name = tds[0].textContent.trim();
+                let value = tds[1].textContent.trim();
 
-            let attributes = [];
+                if (!name || name.startsWith("pa_")) return;
 
-            document.querySelectorAll("table tr").forEach(row => {
-                const cols = row.querySelectorAll("td");
-
-                if (cols.length >= 2) {
-                    const name = cols[0].innerText.trim();
-                    const value = cols[1].innerText.trim();
-
-                    if (name.startsWith("pa_")) return;
-
-                    attributes.push({ name, value });
-                }
-            });
-
-            return { title, images, attributes };
+                attributes.push({ name, value });
+            }
         });
-
-        await browser.close();
 
         res.json({
             status: "success",
-            ...data
+            title,
+            images,
+            attributes
         });
 
     } catch (err) {
-
-        if (browser) await browser.close();
-
         res.json({
             status: "error",
             message: err.message
