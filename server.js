@@ -1,7 +1,6 @@
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
-const { JSDOM } = require("jsdom");
 
 const app = express();
 app.use(cors());
@@ -17,46 +16,46 @@ app.post("/scrape", async (req, res) => {
 
     try {
 
-        const { data: html } = await axios.get(url, {
+        const response = await axios.get(url, {
             headers: {
                 "User-Agent": "Mozilla/5.0"
-            }
+            },
+            timeout: 20000
         });
 
-        const dom = new JSDOM(html);
-        const document = dom.window.document;
+        const html = response.data;
 
-        const title =
-            document.querySelector("h1")?.textContent?.trim() || "";
+        // TITLE
+        const titleMatch = html.match(/<h1[^>]*>(.*?)<\/h1>/i);
+        const title = titleMatch ? titleMatch[1].replace(/<[^>]*>/g, "").trim() : "";
 
-        let images = [];
-        document.querySelectorAll("img").forEach(img => {
-            let src = img.src || "";
-            if (
-                src &&
-                !src.includes("logo") &&
-                !src.includes("icon")
-            ) {
-                images.push(src);
-            }
-        });
+        // IMAGES
+        const imgRegex = /https?:\/\/[^"']+\.(jpg|jpeg|png|webp)/gi;
+        let images = html.match(imgRegex) || [];
 
-        images = [...new Set(images)].slice(0, 10);
+        images = images
+            .filter(i => !i.includes("logo") && !i.includes("icon"))
+            .slice(0, 10);
 
+        // ATTRIBUTES (basit tablo parse)
         let attributes = [];
+        const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+        let row;
 
-        document.querySelectorAll("table tr").forEach(row => {
-            let tds = row.querySelectorAll("td");
+        while ((row = rowRegex.exec(html)) !== null) {
 
-            if (tds.length >= 2) {
-                let name = tds[0].textContent.trim();
-                let value = tds[1].textContent.trim();
+            const cols = row[1].match(/<td[^>]*>([\s\S]*?)<\/td>/gi);
 
-                if (!name || name.startsWith("pa_")) return;
+            if (cols && cols.length >= 2) {
+
+                const name = cols[0].replace(/<[^>]*>/g, "").trim();
+                const value = cols[1].replace(/<[^>]*>/g, "").trim();
+
+                if (!name || name.startsWith("pa_")) continue;
 
                 attributes.push({ name, value });
             }
-        });
+        }
 
         res.json({
             status: "success",
@@ -66,6 +65,7 @@ app.post("/scrape", async (req, res) => {
         });
 
     } catch (err) {
+
         res.json({
             status: "error",
             message: err.message
