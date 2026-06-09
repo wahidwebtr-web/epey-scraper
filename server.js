@@ -1,7 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const puppeteer = require("puppeteer-core");
-const chromium = require("@sparticuz/chromium");
+const puppeteer = require("puppeteer");
 
 const app = express();
 app.use(cors());
@@ -15,15 +14,17 @@ app.post("/scrape", async (req, res) => {
         return res.json({ status: "error", message: "URL missing" });
     }
 
-    let browser = null;
+    let browser;
 
     try {
 
         browser = await puppeteer.launch({
-            args: chromium.args,
-            defaultViewport: chromium.defaultViewport,
-            executablePath: await chromium.executablePath(),
-            headless: chromium.headless
+            headless: "new",
+            args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage"
+            ]
         });
 
         const page = await browser.newPage();
@@ -43,9 +44,10 @@ app.post("/scrape", async (req, res) => {
 
             let images = [];
             document.querySelectorAll("img").forEach(img => {
-                let src = img.src;
-                if (src && !src.includes("logo") && !src.includes("icon")) {
-                    images.push(src);
+                if (img.src &&
+                    !img.src.includes("logo") &&
+                    !img.src.includes("icon")) {
+                    images.push(img.src);
                 }
             });
 
@@ -54,19 +56,15 @@ app.post("/scrape", async (req, res) => {
             let attributes = [];
 
             document.querySelectorAll("table tr").forEach(row => {
-                let cols = row.querySelectorAll("td");
+                const cols = row.querySelectorAll("td");
 
                 if (cols.length >= 2) {
-                    let name = cols[0].innerText.trim();
-                    let value = cols[1].innerText.trim();
+                    const name = cols[0].innerText.trim();
+                    const value = cols[1].innerText.trim();
 
-                    // PA temizleme
                     if (name.startsWith("pa_")) return;
 
-                    attributes.push({
-                        name,
-                        value
-                    });
+                    attributes.push({ name, value });
                 }
             });
 
