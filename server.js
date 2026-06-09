@@ -11,18 +11,30 @@ app.post("/scrape", async (req, res) => {
     const url = req.body.url;
 
     if (!url) {
-        return res.json({ error: "url missing" });
+        return res.json({ status: "error", message: "URL missing" });
     }
 
     try {
 
         const browser = await puppeteer.launch({
             headless: "new",
-            args: ["--no-sandbox", "--disable-setuid-sandbox"]
+            args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage"
+            ]
         });
 
         const page = await browser.newPage();
-        await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
+
+        await page.setUserAgent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+        );
+
+        await page.goto(url, {
+            waitUntil: "domcontentloaded",
+            timeout: 60000
+        });
 
         const data = await page.evaluate(() => {
 
@@ -41,12 +53,17 @@ app.post("/scrape", async (req, res) => {
             let attributes = [];
 
             document.querySelectorAll("table tr").forEach(row => {
-                let tds = row.querySelectorAll("td");
-                if (tds.length >= 2) {
-                    attributes.push({
-                        name: tds[0].innerText.trim(),
-                        value: tds[1].innerText.trim()
-                    });
+                let cols = row.querySelectorAll("td");
+                if (cols.length >= 2) {
+                    let name = cols[0].innerText.trim();
+                    let value = cols[1].innerText.trim();
+
+                    if (
+                        name.includes("Fiyat") ||
+                        name.includes("pa_")
+                    ) return;
+
+                    attributes.push({ name, value });
                 }
             });
 
