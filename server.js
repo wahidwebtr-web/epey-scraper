@@ -1,6 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const axios = require("axios");
+const puppeteer = require("puppeteer");
 
 const app = express();
 app.use(cors());
@@ -14,57 +14,75 @@ app.post("/scrape", async (req, res) => {
         return res.json({ status: "error", message: "URL missing" });
     }
 
+    let browser;
+
     try {
 
-        const response = await axios.get(url, {
-            headers: {
-                "User-Agent": "Mozilla/5.0"
-            },
-            timeout: 20000
+        browser = await puppeteer.launch({
+            headless: "new",
+            args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage"
+            ]
         });
 
-        const html = response.data;
+        const page = await browser.newPage();
 
-        // TITLE
-        const titleMatch = html.match(/<h1[^>]*>(.*?)<\/h1>/i);
-        const title = titleMatch ? titleMatch[1].replace(/<[^>]*>/g, "").trim() : "";
+        await page.setUserAgent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+        );
 
-        // IMAGES
-        const imgRegex = /https?:\/\/[^"']+\.(jpg|jpeg|png|webp)/gi;
-        let images = html.match(imgRegex) || [];
+        await page.goto(url, {
+            waitUntil: "networkidle2",
+            timeout: 60000
+        });
 
-        images = images
-            .filter(i => !i.includes("logo") && !i.includes("icon"))
-            .slice(0, 10);
+        const data = await page.evaluate(() => {
 
-        // ATTRIBUTES (basit tablo parse)
-        let attributes = [];
-        const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-        let row;
+            const title = document.querySelector("h1")?.innerText?.trim() || "";
 
-        while ((row = rowRegex.exec(html)) !== null) {
+            let images = [];
+            document.querySelectorAll("img").forEach(img => {
+                if (img.src &&
+                    !img.src.includes("logo") &&
+                    !img.src.includes("icon")) {
+                    images.push(img.src);
+                }
+            });
 
-            const cols = row[1].match(/<td[^>]*>([\s\S]*?)<\/td>/gi);
+            images = [...new Set(images)].slice(0, 12);
 
-            if (cols && cols.length >= 2) {
+            let attributes = [];
 
-                const name = cols[0].replace(/<[^>]*>/g, "").trim();
-                const value = cols[1].replace(/<[^>]*>/g, "").trim();
+            document.querySelectorAll("table tr").forEach(row => {
 
-                if (!name || name.startsWith("pa_")) continue;
+                const tds = row.querySelectorAll("td");
 
-                attributes.push({ name, value });
-            }
-        }
+                if (tds.length >= 2) {
+
+                    const name = tds[0].innerText.trim();
+                    const value = tds[1].innerText.trim();
+
+                    if (!name || name.startsWith("pa_")) return;
+
+                    attributes.push({ name, value });
+                }
+            });
+
+            return { title, images, attributes };
+        });
+
+        await browser.close();
 
         res.json({
             status: "success",
-            title,
-            images,
-            attributes
+            ...data
         });
 
     } catch (err) {
+
+        if (browser) await browser.close();
 
         res.json({
             status: "error",
@@ -73,12 +91,6 @@ app.post("/scrape", async (req, res) => {
     }
 });
 
-app.get("/", (req, res) => {
-    res.send("SCRAPER OK");
-});
-
-const PORT = process.env.PORT || 3001;
-
-app.listen(PORT, () => {
-    console.log("SCRAPER RUNNING " + PORT);
+app.listen(process.env.PORT || 3001, () => {
+    console.log("SCRAPER RUNNING");
 });
